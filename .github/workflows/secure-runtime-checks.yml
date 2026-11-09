@@ -56,6 +56,27 @@ jobs:
       - name: Verify Python syntax
         run: python -m compileall -q .
 
+      - name: Install and start Docker Engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y docker.io
+          fi
+          if ! docker info >/dev/null 2>&1; then
+            sudo systemctl start docker
+          fi
+          for attempt in {1..30}; do
+            if docker info >/dev/null 2>&1; then
+              echo 'Docker Engine is ready.'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Docker Engine failed to become ready.' >&2
+          exit 1
+
       - name: Check Docker CLI
         run: docker --version
 
