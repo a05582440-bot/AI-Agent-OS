@@ -1,0 +1,101 @@
+name: Secure Runtime Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-runtime-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-checks:
+    name: Runtime and toolchain checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Node.js and npm versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: '**/requirements.txt'
+
+      - name: Install backend requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t requirements_files < <(find . -type f -name requirements.txt -not -path '*/.git/*' | sort)
+          if ((${#requirements_files[@]} == 0)); then
+            echo 'No requirements.txt found; skipping dependency installation.'
+          else
+            for requirements_file in "${requirements_files[@]}"; do
+              echo "Installing ${requirements_file}"
+              python -m pip install --upgrade pip
+              python -m pip install -r "${requirements_file}"
+            done
+          fi
+
+      - name: Verify Python syntax
+        run: python -m compileall -q .
+
+      - name: Check Docker CLI
+        run: docker --version
+
+      - name: Check Docker Engine
+        run: docker info
+
+      - name: Detect Android project
+        id: android-detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -type f -name AndroidManifest.xml -not -path '*/.git/*' -print -quit | grep -q . \
+            || grep -R -l -E 'com\.android\.(application|library)' --include='build.gradle' --include='build.gradle.kts' --exclude-dir=.git . >/dev/null 2>&1; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+            echo 'Android/Gradle project marker detected.'
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'No Android/Gradle project detected; Android checks will be skipped.'
+          fi
+
+      - name: Set up Java for Android/Gradle
+        if: steps.android-detection.outputs.present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        if: steps.android-detection.outputs.present == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Verify Gradle and Android SDK
+        if: steps.android-detection.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -x ./gradlew ]]; then
+            ./gradlew --version
+          else
+            gradle --version
+          fi
+          sdkmanager --version
+          adb --version
