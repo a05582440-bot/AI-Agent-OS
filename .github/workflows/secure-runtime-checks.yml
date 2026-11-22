@@ -15,7 +15,7 @@ concurrency:
 jobs:
   runtime-checks:
     name: Runtime and toolchain checks
-    runs-on: ubuntu-latest
+    runs-on: runzumi-ubuntu-24.04-x64-4
     timeout-minutes: 20
     steps:
       - name: Check out repository
